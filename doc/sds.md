@@ -27,44 +27,61 @@ It refines the requirements in `doc/srs.md` into an implementable design.
 
 ## 2. Architectural Overview
 
-### 2.1 The two-role model
+### 2.1 The multi-role model
 
-`hark` is a single executable that operates in one of two roles, selected
+`hark` is a single executable that operates in one of several roles, selected
 by its arguments:
 
-- **Schedule role** — the user-facing path. Parses inputs, resolves the
-  delivery time, and registers a one-shot timer that will later re-invoke this
-  same executable in the deliver role.
-- **Deliver role** — invoked by the timer (hidden `deliver` subcommand). Sends
-  the message to the recipient's terminal, then exits.
+- **Register role** — the user-facing path. Parses inputs, resolves the trigger
+  (time, file event, or process exit), and arranges for delivery: a transient
+  systemd timer for time, or a transient systemd background service for events.
+  For a zero-delay time it delivers inline.
+- **Deliver role** — invoked by a timer (hidden `deliver` subcommand). Sends the
+  message to the recipient's terminal, then exits.
+- **Watch roles** — invoked by a background service (hidden `watch-file` /
+  `watch-pid`). Block until the event, then deliver, then exit.
+- **Run role** — `run -- <cmd>`. Runs a command in the foreground and, on its
+  exit, delivers an outcome message, then exits with the command's code.
 
 This keeps a single binary while cleanly separating "decide and register" from
-"act now."
+"watch/act."
 
-### 2.2 Delegated scheduling
+### 2.2 Delegated waiting
 
-Rather than running a process that sleeps until delivery time (which would
-violate FR-17 and require a daemon, NFR-4), scheduling is delegated to the
-per-user **systemd** instance through a **transient timer** created with
-`systemd-run --user`. systemd owns the wait, survives the scheduling process's
-exit, fires punctually, and garbage-collects the unit afterwards.
+Rather than a process that sleeps until the trigger (which would violate FR-17
+and imply a daemon, NFR-4), the wait is delegated to the per-user **systemd**
+instance via `systemd-run --user`:
+
+- **Time triggers** create a **transient timer** (`--on-active`). systemd owns
+  the wait, fires punctually, and garbage-collects the unit afterwards.
+- **Event triggers** create a **transient service** (no `--wait`) that runs a
+  watch role. The register command returns immediately (FR-31); systemd
+  supervises the watcher, captures its output to the journal, and GCs the unit
+  when it exits successfully (FR-33).
+
+The **run role** is the deliberate exception: it does *not* delegate, because
+being the command's parent is precisely what lets it read the real exit status
+(FR-32).
 
 ### 2.3 Component diagram
 
 ```
-                         schedule role                       deliver role
-  user ──► hark ─┬─► timeparse ──► (absolute time)        (timer fires)
-                 │                                                  │
-                 └─► schedule ──► systemd-run --user ──► hark deliver
-                                         (transient timer)          │
-                                                                    ▼
-                                                                 deliver
-                                                              ├─ write(1)
-                                                              └─ direct TTY
-                                                                    │
-                                                                    ▼
-                                                          recipient terminal(s)
+                       register role                         act role
+  user ──► hark ─┬─► time   ─► systemd-run --on-active ─► hark deliver ─┐
+                 │            (transient timer)                         │
+                 ├─► --on-file ─► systemd-run (service) ─► hark watch-file ─► deliver
+                 ├─► --on-exit ─► systemd-run (service) ─► hark watch-pid  ─► deliver
+                 │                                                      │
+                 └─► run -- cmd ─► (foreground child) ──► on exit ──► deliver
+                                                                       ▼
+                                                          deliver ─► write(1)
+                                                                  └─ direct TTY
+                                                                       ▼
+                                                            recipient terminal(s)
 ```
+
+Time/event paths delegate the wait to systemd and return immediately; `run`
+stays in the foreground so it can read the child's exit status.
 
 ### 2.4 Runtime sequence (relative example)
 
@@ -94,9 +111,11 @@ Source layout (`src/`):
 
 | Module | Responsibility |
 |--------|----------------|
-| `main.rs` | CLI definition, role dispatch, input validation |
+| `main.rs` | CLI definition, role/trigger dispatch, input validation |
 | `timeparse.rs` | Resolve absolute/relative "when" to a local timestamp |
-| `schedule.rs` | Register the one-shot systemd transient timer |
+| `schedule.rs` | Register the one-shot systemd transient timer (or deliver now) |
+| `event.rs` | File/process triggers: register background watchers; the watch loops |
+| `runcmd.rs` | `run` role: execute a command and notify on its exit |
 | `deliver.rs` | Deliver the message to the recipient's terminal |
 
 ### 3.1 `main.rs` — CLI and dispatch
@@ -230,12 +249,53 @@ recipient — unlike `wall`, it does not broadcast to unrelated users (FR-20).
 For the default self-notify case the user owns their own terminals, so the
 fallback succeeds without elevated privileges.
 
+### 3.5 `event.rs` — file and process triggers
+
+Defines `FileEvent { Created, Modified, Removed }` (a clap `ValueEnum`) and two
+pairs of functions: `register_*` (register role) and `watch_*` (watch role).
+
+**Registration (background watcher).** `register_file_watch` /
+`register_pid_watch` build a unique unit name `hark-watch-<ts>-<pid>` and call a
+shared `spawn_watcher`, which runs `systemd-run --user --unit=… <self>
+watch-file|watch-pid …` with no `--wait`. The transient **service** starts and
+the call returns immediately (FR-31). `register_pid_watch` first rejects a PID
+whose `/proc/<pid>` is absent (FR-30).
+
+**`watch_file` (FR-29).** inotify watches the **parent directory** and filters
+events by the target's basename, which handles a not-yet-existing path and
+removal uniformly. Event → mask:
+`Created → CREATE|MOVED_TO`, `Modified → CLOSE_WRITE|MODIFY`,
+`Removed → DELETE|MOVED_FROM|DELETE_SELF`. It reads events blocking until a
+matching name appears (or, for `Removed`, a nameless `DELETE_SELF`), then
+delivers. As a special case, `Created` on an already-existing path delivers
+immediately.
+
+**`watch_pid` (FR-30).** Polls `Path::new("/proc/<pid>").exists()` at ~1 s until
+the entry disappears, then delivers. No exit status is read (it is not a child;
+§1.2).
+
+**Design choice (`/proc` polling vs `pidfd`).** Polling `/proc` is
+dependency-free and adequate for the long-running jobs this targets; `pidfd`
+would be event-driven and reuse-proof but needs raw syscalls or another crate.
+The ~1 s latency and PID-reuse caveat are documented and acceptable for the MVP.
+
+### 3.6 `runcmd.rs` — run-and-notify (FR-32)
+
+`run(cmd, recipient, prefix)` splits `cmd` into program + args, runs it
+foreground with inherited stdio, and `wait`s. It composes the outcome from the
+`ExitStatus`: `SUCCESS`, `FAILED (exit N)`, or `terminated by signal N` (via
+`ExitStatusExt`). The message is `<prefix-or-command-line> <outcome>`. Delivery
+is best-effort — a failed notification is logged but must not change the exit
+code. Finally it `process::exit`s with the command's own code, so `hark run`
+is transparent in scripts and pipelines.
+
 ---
 
 ## 4. Data Design
 
-`hark` holds no persistent application state. The only "state" is the set
-of pending transient timer units, owned and stored by systemd.
+`hark` holds no persistent application state. The only "state" is the set of
+pending transient units owned by systemd: timer units (`hark-…`) for time
+triggers and service units (`hark-watch-…`) for active event watchers.
 
 Transient values during a run:
 
@@ -271,6 +331,10 @@ Transient values during a run:
 | `RemainAfterElapse=no` + `AccuracySec=1s` | Self-cleanup (FR-15) and punctuality (NFR-1) | systemd defaults (lingering units, ~1-min lateness) |
 | `write(1)` then direct-TTY fallback | Canonical first; robust + targeted when `write` is broken | `wall` fallback (broadcasts to all users — not targeted) |
 | Hand-rolled duration parser | Tiny domain grammar incl. natural phrasing; few deps; testable | General-purpose duration crate |
+| Event watchers as transient systemd **services** | Background, supervised, journal-logged, GC'd; register call returns at once (FR-31) | systemd `.path` units (no transient form via `systemd-run`, can't watch removal); foreground blocking (ties up shell) |
+| inotify on the **parent directory** | Uniformly handles not-yet-existing paths, creation, and removal by basename filter | watching the file node directly (misses creation; awkward for removal) |
+| `/proc` polling for PID exit | Dependency-free; ~1 s latency fine for long jobs | `pidfd` (event-driven, reuse-proof, but raw syscalls / extra crate) |
+| `run -- <cmd>` is the command's parent | Only way to read the real exit status (FR-32) | Attach to an external PID (no exit code obtainable) |
 
 ---
 
@@ -287,8 +351,13 @@ Transient values during a run:
     the message reaches the terminal(s), the service result is success, and the
     unit is garbage-collected (FR-13, FR-15, FR-18).
   - Verify confirmation output and immediate return (FR-16, FR-17).
-  - Verify rejection paths: missing message, no time, past time, malformed time
-    (FR-2, FR-5, FR-11, FR-12).
+  - Verify rejection paths: missing message, past time, malformed time, and two
+    triggers at once (FR-2, FR-11, FR-12, FR-28).
+  - Event triggers: register `--on-file`/`--on-exit`, confirm prompt return and
+    a running `hark-watch-*` unit, cause the event, and confirm delivery plus
+    unit GC (FR-29, FR-30, FR-31, FR-33).
+  - `run -- <cmd>`: a passing and a failing command; confirm the outcome message
+    and that hark exits with the command's code (FR-32).
 
 ---
 
@@ -300,9 +369,10 @@ Transient values during a run:
 | `chrono` | Local date/time and duration arithmetic |
 | `anyhow` | Error propagation with context |
 | `whoami` | Current username and host for default recipient and banner |
+| `inotify` (default features off) | Filesystem-event watching (blocking API; no async/tokio) |
 
-External commands: `systemd-run`, `systemctl` (scheduling); `write`, `who`
-(delivery).
+External commands: `systemd-run`, `systemctl` (scheduling/watching); `write`,
+`who` (delivery). Kernel/OS: `inotify`, `/proc`.
 
 ---
 
@@ -311,6 +381,11 @@ External commands: `systemd-run`, `systemctl` (scheduling); `write`, `who`
 | SRS | Design element |
 |-----|----------------|
 | FR-1..FR-6 | `main.rs` CLI model + validation |
+| FR-28 | clap `trigger` arg group (mutually exclusive) |
+| FR-29 | `event::watch_file` (inotify on parent dir) + `register_file_watch` |
+| FR-30 | `event::watch_pid` (`/proc` poll) + `register_pid_watch` (PID precheck) |
+| FR-31, FR-33 | `event::spawn_watcher` (transient service, no `--wait`); systemd GC |
+| FR-32 | `runcmd::run` (foreground, exit-code propagation, outcome message) |
 | FR-7 | `timeparse::parse_absolute` |
 | FR-8..FR-10 | `timeparse::parse_duration` |
 | FR-11, FR-12 | `timeparse` errors; `schedule` past-time check |

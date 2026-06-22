@@ -18,15 +18,18 @@ It is intended for developers, reviewers, and maintainers of the tool.
 
 ### 1.2 Scope
 
-`hark` lets a user schedule a one-shot text notification, to be delivered
-either at an absolute date/time or after a relative delay. The message is
-delivered to a logged-in local user's terminal. The tool requires no graphical
-environment and no long-running daemon of its own; each invocation is
-independent and may be issued many times.
+`hark` lets a user request a one-shot text notification, delivered to a
+logged-in local user's terminal when a **trigger** is satisfied. A trigger is
+one of: an absolute date/time, a relative delay, a filesystem event on a path
+(created / modified / removed), or the exit of a process. As a convenience it
+can also run a command and notify on its completion, reporting success/failure.
+The tool requires no graphical environment and no long-running daemon of its
+own; each invocation is independent and may be issued many times.
 
-Out of scope: recurring/repeating reminders, GUI/desktop notifications,
-delivery to remote hosts, message persistence across reboots, and delivery to
-users who are not logged in at delivery time.
+Out of scope: recurring/repeating triggers, GUI/desktop notifications, delivery
+to remote hosts, message persistence across reboots, delivery to users who are
+not logged in at delivery time, and reading the exit status of a process that
+`hark` did not itself start.
 
 ### 1.3 Definitions, Acronyms, Abbreviations
 
@@ -75,6 +78,8 @@ privileges are required to notify oneself.
 - Linux with a running per-user systemd instance (`systemd --user`).
 - Terminal-messaging utilities available: `write`, `wall`, `who`.
 - A text terminal for the recipient to be logged into at delivery time.
+- `inotify` available (for filesystem-event triggers) and `/proc` mounted (for
+  process-exit triggers).
 
 ### 2.5 Constraints
 
@@ -190,6 +195,36 @@ and a notification that cannot be shown on a terminal is intentionally dropped.
 > notification) are deliberately excluded; should guaranteed delivery become a
 > requirement, FR-23–FR-26 would need revision.
 
+### 3.6 Event and command triggers
+
+In addition to time (FR-5), the delivery trigger may be a filesystem event, a
+process exit, or the completion of a command. Exactly one trigger applies per
+invocation.
+
+- **FR-28 (Mutually exclusive triggers).** The system shall accept at most one
+  of: absolute time, relative delay, file-event watch, process-exit watch. It
+  shall reject any combination of two or more.
+- **FR-29 (File-event trigger).** The system shall accept a path and a file
+  event — one of `created`, `modified`, `removed` — and deliver the message
+  when that event next occurs for the path. When the event is omitted, it shall
+  default to `modified`. For `created`, if the path already exists at
+  registration time, the system shall treat the condition as already satisfied.
+- **FR-30 (Process-exit trigger).** The system shall accept a process id and
+  deliver the message when that process exits. It shall reject a process id that
+  does not exist at registration time. It shall not attempt to report the exit
+  status of such a process (out of scope, §1.2).
+- **FR-31 (Background watching).** File-event and process-exit triggers shall be
+  watched in the background: the invoking command shall return promptly
+  (cf. FR-17) and the watch shall continue independently until the event occurs.
+- **FR-32 (Run-and-notify).** The system shall provide a `run` command that
+  executes a given command line in the foreground and, on its completion,
+  delivers a notification stating the outcome — success, or failure with the
+  exit code or terminating signal. The system shall exit with the command's own
+  exit code, and a delivery failure shall not alter that exit code.
+- **FR-33 (Watch observability/cleanup).** A background watch shall be
+  inspectable and cancellable via the platform service manager, and shall leave
+  no residual artifact after the event fires and delivery succeeds (cf. FR-15).
+
 ---
 
 ## 4. Non-Functional Requirements
@@ -213,20 +248,26 @@ and a notification that cannot be shown on a terminal is intentionally dropped.
 ### 5.1 Command-line interface
 
 ```
-hark [--in <DURATION> | --at <DATETIME>]  -m <MESSAGE> [-t <USER>]
+hark [TRIGGER]  -m <MESSAGE> [-t <USER>]
+hark run [-m <MESSAGE>] [-t <USER>] -- <CMD> [ARGS...]
 ```
 
 | Option | Required | Description |
 |--------|----------|-------------|
-| `--in <DURATION>` | no (mutually exclusive with `--at`) | Relative delay from now; `0s` = now |
-| `--at <DATETIME>` | no (mutually exclusive with `--in`) | Absolute local date/time |
-| `-m, --message <TEXT>` | yes | Message text |
+| `--in <DURATION>` | trigger (≤1) | Relative delay from now; `0s` = now |
+| `--at <DATETIME>` | trigger (≤1) | Absolute local date/time |
+| `--on-file <PATH>` | trigger (≤1) | Filesystem-event watch on a path |
+| `--event <E>` | with `--on-file` | `created` \| `modified` \| `removed` (default `modified`) |
+| `--on-exit <PID>` | trigger (≤1) | Watch until the process exits |
+| `-m, --message <TEXT>` | yes (optional for `run`) | Message text |
 | `-t, --to <USER>` | no | Recipient username (default: sender) |
 
-If neither `--in` nor `--at` is given, the message is delivered immediately.
+If no trigger is given, the message is delivered immediately. The `run`
+subcommand runs a command (after `--`) and notifies on its completion.
 
-An internal, hidden `deliver` subcommand performs delivery and is not part of
-the public interface; it is invoked only by the scheduler.
+Internal, hidden subcommands (`deliver`, `watch-file`, `watch-pid`) perform
+delivery and background watching; they are not part of the public interface and
+are invoked only by `hark` itself.
 
 ### 5.2 System interfaces
 
@@ -253,6 +294,11 @@ the public interface; it is invoked only by the scheduler.
 | FR-27 | Run with `--in 0s`, and also with no `--in`/`--at`; verify immediate inline delivery, real result reported, and no timer unit created. |
 | FR-18..FR-22 | Verify terminal delivery, fallback path, failure reporting, and banner presence. |
 | FR-23..FR-26 | Schedule for a recipient who is not on any terminal; verify the message is dropped (no retry/queue/inbox) and the failure is recorded in the service log. |
+| FR-28 | Supply two triggers (e.g. `--in` + `--on-file`); verify rejection. |
+| FR-29 | Watch a path for created/modified/removed; verify delivery on the event and immediate delivery when a `created` target already exists. |
+| FR-30 | Watch a live PID and a nonexistent PID; verify delivery on exit and rejection of the missing PID. |
+| FR-31, FR-33 | Verify `--on-file`/`--on-exit` return promptly, watch in the background, are listable/cancellable, and leave no unit after success. |
+| FR-32 | `hark run -- <cmd>` for a passing and a failing command; verify outcome message and that hark exits with the command's code. |
 | NFR-1 | Measure delivery latency against requested time. |
 | NFR-2..NFR-6 | Verify no-GUI operation, self-notify without root, no daemon, diagnostics, and local-time interpretation. |
 
@@ -269,3 +315,6 @@ the public interface; it is invoked only by the scheduler.
 | Recipient omitted → self | FR-4 |
 | When = absolute date and time | FR-7 |
 | When = relative ("3 minutes later") | FR-8, FR-9 |
+
+Event and command triggers (FR-28–FR-33) are an **extension** beyond the
+original brief, added to support "notify me when a build/job finishes or fails."

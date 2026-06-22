@@ -1,21 +1,30 @@
 # hark
 
-A CUI (no-GUI) timer notifier. Schedule a text message to be delivered to a
-local Linux user at a given time. One-shot, callable many times.
+A CUI (no-GUI) notifier. Deliver a text message to a local Linux user when a
+**time** arrives or when an **event** happens — a file is created/modified/
+removed, or a process exits. Built for "kick off a long job, get pinged when it
+finishes." One-shot, callable many times.
 
 ## How it works
 
-`hark` is a single binary with two roles:
+`hark` resolves a *trigger* and then delivers a message:
 
-1. **Schedule** (what you run): parses *when* + *message* + *recipient*, then
-   registers a one-shot **systemd `--user` transient timer** (`systemd-run`)
-   that re-invokes the binary later. The timer self-destructs after firing
-   (`RemainAfterElapse=no`) and fires punctually (`AccuracySec=1s`).
-2. **Deliver** (run by the timer, hidden `deliver` subcommand): sends the text
-   to the recipient's terminal via `write(1)`, falling back to writing directly
-   to the recipient's TTYs when `write(1)` is unusable.
+- **Time triggers** register a one-shot **systemd `--user` transient timer**
+  (`systemd-run`) that re-invokes the binary later. The timer self-destructs
+  after firing (`RemainAfterElapse=no`) and fires punctually (`AccuracySec=1s`).
+- **Event triggers** (`--on-file`, `--on-exit`) register a background systemd
+  `--user` *service* that watches (inotify for files, `/proc` polling for a
+  PID), then delivers when the event fires. The command returns immediately.
+- **`run -- <cmd>`** executes a command in the foreground and notifies on exit,
+  **including its success/failure status** (it is the command's parent, so it
+  has the real exit code).
 
-No root, no daemon, no persistent state — each invocation is independent.
+Delivery (hidden `deliver` role) sends the text to the recipient's terminal via
+`write(1)`, falling back to writing directly to the recipient's TTYs when
+`write(1)` is unusable.
+
+No root, no daemon of its own, no persistent state — each invocation is
+independent.
 
 ## Usage
 
@@ -40,16 +49,43 @@ hark --at "2026-06-22 15:30" -m "standup" -t alice
 | `-m, --message`   | the message text (required) |
 | `-t, --to <USER>` | recipient username (defaults to current user) |
 
-`--in` and `--at` are mutually exclusive. If neither is given, the message is
-delivered immediately.
+`--in`, `--at`, `--on-file`, and `--on-exit` are mutually exclusive triggers. If
+none is given, the message is delivered immediately.
 
-## Inspecting / cancelling scheduled jobs
-
-Each job is a transient systemd user unit named `hark-<timestamp>-<pid>`:
+## Event triggers
 
 ```sh
-systemctl --user list-timers 'hark-*'      # pending jobs
-systemctl --user stop hark-<...>.timer     # cancel one
+# Notify when a build finishes — with its success/failure status (best option).
+hark run -- bitbake core-image-minimal
+hark run -m "nightly" -- make -j8        # custom message; outcome appended
+
+# Notify when an already-running process exits (no exit status available).
+hark --on-exit 48213 -m "build done"
+
+# Notify on a filesystem event (created | modified | removed; default modified).
+hark --on-file ./tmp/deploy/image.wic --event created -m "image ready"
+hark --on-file build.log --event modified -m "log changed"
+```
+
+`run -- <cmd>` runs in the foreground and exits with the command's own exit
+code. `--on-file`/`--on-exit` return immediately and watch in the background.
+
+| Trigger | Meaning |
+|---------|---------|
+| `run -- <cmd>` | run a command, notify on exit with SUCCESS / FAILED (exit N) |
+| `--on-exit <PID>` | notify when an existing process exits |
+| `--on-file <PATH> --event <E>` | notify on `created`/`modified`/`removed` |
+
+## Inspecting / cancelling jobs
+
+Time jobs are transient timer units `hark-<timestamp>-<pid>`; event watchers are
+transient service units `hark-watch-<timestamp>-<pid>`:
+
+```sh
+systemctl --user list-timers 'hark-*'              # pending time jobs
+systemctl --user list-units 'hark-watch-*'         # running event watchers
+systemctl --user stop hark-<...>.timer             # cancel a time job
+systemctl --user stop hark-watch-<...>.service     # cancel an event watcher
 ```
 
 ## Delivery requirements & caveats
@@ -65,9 +101,14 @@ terminal** (tty/pts) at delivery time.
   binary (`-rwxr-sr-x root tty`) and that the recipient has `mesg y`. On systems
   where `write` has lost its set-gid bit, cross-user delivery won't work without
   elevated privileges.
-- The recipient's `--user` systemd manager must be running. If you schedule for
-  a user who may log out before delivery, enable lingering:
+- The recipient's `--user` systemd manager must be running. Time jobs and event
+  watchers both live inside it, so if the user logs out before the trigger
+  fires, they stop. Enable lingering to survive logout:
   `loginctl enable-linger <user>`.
+- `--on-exit` watches an *existing* process and cannot read its exit status (it
+  is not a child), so it reports only that the process ended; it also polls
+  `/proc` at ~1s, and a recycled PID could in principle mislead it. Use
+  `run -- <cmd>` when you need the actual success/failure.
 
 ## Build & test
 

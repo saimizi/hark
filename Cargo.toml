@@ -3,6 +3,7 @@ name = "hark"
 version = "0.1.0"
 edition = "2021"
 description = "CUI timer notifier — sends a text message to a local user at a scheduled time via write/wall"
+license = "MIT"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }

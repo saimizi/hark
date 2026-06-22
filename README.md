@@ -116,3 +116,9 @@ terminal** (tty/pts) at delivery time.
 cargo build --release
 cargo test
 ```
+
+## License
+
+Licensed under the [MIT License](LICENSE). Dependencies are permissively
+licensed (MIT / Apache-2.0 / ISC); if you redistribute compiled binaries,
+include their license notices as attribution.

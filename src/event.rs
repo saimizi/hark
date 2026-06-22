@@ -77,6 +77,12 @@ pub fn register_file_watch(
     recipient: &str,
     message: &str,
 ) -> Result<()> {
+    // Resolve to an absolute path now, while we still have the caller's working
+    // directory. The background watcher runs under systemd --user with a
+    // different CWD, so a relative path would not resolve there.
+    let path = absolute_path(path)?;
+    let path = path.as_str();
+
     let unit = watch_unit();
     // Structured description so `hark list` can recover the details. `path` is
     // placed last because it may contain spaces.
@@ -193,6 +199,37 @@ pub fn watch_pid(pid: i32, recipient: &str, message: &str) -> Result<()> {
 /// Whether `/proc/<pid>` currently exists.
 fn proc_exists(pid: i32) -> bool {
     Path::new(&format!("/proc/{pid}")).exists()
+}
+
+/// Resolve `path` to an absolute path against the current working directory.
+/// Does not require the path to exist (it may be a not-yet-created or
+/// about-to-be-removed target), so it does not canonicalize.
+fn absolute_path(path: &str) -> Result<String> {
+    let p = Path::new(path);
+    if p.is_absolute() {
+        Ok(path.to_string())
+    } else {
+        let cwd = std::env::current_dir().context("could not determine current directory")?;
+        Ok(cwd.join(p).to_string_lossy().into_owned())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn absolute_path_keeps_absolute() {
+        assert_eq!(absolute_path("/tmp/x").unwrap(), "/tmp/x");
+    }
+
+    #[test]
+    fn absolute_path_resolves_relative_against_cwd() {
+        let cwd = std::env::current_dir().unwrap();
+        let got = absolute_path("rel/file").unwrap();
+        assert!(Path::new(&got).is_absolute());
+        assert_eq!(got, cwd.join("rel/file").to_string_lossy());
+    }
 }
 
 fn deliver_and_log(recipient: &str, message: &str) -> Result<()> {

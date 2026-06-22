@@ -1,5 +1,6 @@
 mod deliver;
 mod event;
+mod list;
 mod runcmd;
 mod schedule;
 mod timeparse;
@@ -64,6 +65,9 @@ enum Command {
         cmd: Vec<String>,
     },
 
+    /// List notifications currently registered with systemd.
+    List,
+
     /// Internal: deliver a message right now (invoked by the systemd timer).
     #[command(hide = true)]
     Deliver {
@@ -107,6 +111,7 @@ fn main() -> Result<()> {
             let recipient = to.clone().unwrap_or_else(whoami::username);
             return runcmd::run(cmd, &recipient, message.as_deref());
         }
+        Some(Command::List) => return list::list(),
         Some(Command::Deliver { to, message }) => return deliver::deliver(to, message),
         Some(Command::WatchFile {
             path,

@@ -79,14 +79,25 @@ code. `--on-file`/`--on-exit` return immediately and watch in the background.
 | `--on-exit <PID>` | notify when an existing process exits |
 | `--on-file <PATH> --event <E>` | notify on `created`/`modified`/`removed` |
 
-## Inspecting / cancelling jobs
+## Listing / cancelling jobs
 
-Time jobs are transient timer units `hark-<timestamp>-<pid>`; event watchers are
-transient service units `hark-watch-<timestamp>-<pid>`:
+`hark list` shows everything currently registered — time jobs and event
+watchers — with the unit name you need to cancel one:
 
 ```sh
-systemctl --user list-timers 'hark-*'              # pending time jobs
-systemctl --user list-units 'hark-watch-*'         # running event watchers
+$ hark list
+TYPE  TRIGGER                  TO      STATE      MESSAGE             UNIT
+time  2026-06-22 19:06:00      joukan  scheduled  tea time, please    hark-2026...timer
+file  created /tmp/img.wic     joukan  running    image ready         hark-watch-...service
+proc  pid 48213                joukan  running    build done          hark-watch-...service
+```
+
+`hark` keeps no state of its own; the list is reconstructed from systemd. Time
+jobs are transient timer units `hark-<timestamp>-<pid>`; event watchers are
+transient service units `hark-watch-<timestamp>-<pid>`. To cancel one, stop its
+unit:
+
+```sh
 systemctl --user stop hark-<...>.timer             # cancel a time job
 systemctl --user stop hark-watch-<...>.service     # cancel an event watcher
 ```

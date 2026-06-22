@@ -41,7 +41,11 @@ pub fn schedule(target: DateTime<Local>, recipient: &str, message: &str) -> Resu
         // hark wants to be punctual.
         .arg("--timer-property=AccuracySec=1s")
         .arg(format!("--unit={unit}"))
-        .arg(format!("--description=hark message for {recipient}"))
+        // Structured description so `hark list` can recover the details.
+        .arg(format!(
+            "--description=hark-job kind=time to={recipient} at={}",
+            target.to_rfc3339()
+        ))
         .arg(&exe)
         .arg("deliver")
         .arg("--to")

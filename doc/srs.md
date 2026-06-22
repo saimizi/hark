@@ -227,6 +227,12 @@ invocation.
 - **FR-33 (Watch observability/cleanup).** A background watch shall be
   inspectable and cancellable via the platform service manager, and shall leave
   no residual artifact after the event fires and delivery succeeds (cf. FR-15).
+- **FR-34 (List registered notifications).** The system shall provide a `list`
+  command that reports all currently registered notifications — time triggers
+  and event watchers alike — showing for each its trigger, recipient, message,
+  state, and the identifier needed to cancel it. The listing shall be derived
+  from the platform service manager (no separate state store), and shall report
+  an empty result clearly when none are registered.
 
 ---
 
@@ -253,6 +259,7 @@ invocation.
 ```
 hark [TRIGGER]  -m <MESSAGE> [-t <USER>]
 hark run [-m <MESSAGE>] [-t <USER>] -- <CMD> [ARGS...]
+hark list
 ```
 
 | Option | Required | Description |
@@ -302,6 +309,7 @@ are invoked only by `hark` itself.
 | FR-30 | Watch a live PID and a nonexistent PID; verify delivery on exit and rejection of the missing PID. |
 | FR-31, FR-33 | Verify `--on-file`/`--on-exit` return promptly, watch in the background, are listable/cancellable, and leave no unit after success. |
 | FR-32 | `hark run -- <cmd>` for a passing and a failing command; verify outcome message and that hark exits with the command's code. |
+| FR-34 | Register several triggers, run `hark list`; verify each appears with trigger/recipient/message/state/unit, and that an empty set reports clearly. |
 | NFR-1 | Measure delivery latency against requested time. |
 | NFR-2..NFR-6 | Verify no-GUI operation, self-notify without root, no daemon, diagnostics, and local-time interpretation. |
 

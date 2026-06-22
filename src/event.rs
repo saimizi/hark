@@ -78,9 +78,15 @@ pub fn register_file_watch(
     message: &str,
 ) -> Result<()> {
     let unit = watch_unit();
+    // Structured description so `hark list` can recover the details. `path` is
+    // placed last because it may contain spaces.
+    let description = format!(
+        "hark-job kind=file event={} to={recipient} path={path}",
+        event.as_arg()
+    );
     spawn_watcher(
         &unit,
-        &format!("hark file watch for {recipient}"),
+        &description,
         &[
             "watch-file",
             "--path",
@@ -109,7 +115,7 @@ pub fn register_pid_watch(pid: i32, recipient: &str, message: &str) -> Result<()
     let pid_s = pid.to_string();
     spawn_watcher(
         &unit,
-        &format!("hark process watch for {recipient}"),
+        &format!("hark-job kind=pid pid={pid} to={recipient}"),
         &[
             "watch-pid",
             "--pid",

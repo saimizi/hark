@@ -116,6 +116,7 @@ Source layout (`src/`):
 | `schedule.rs` | Register the one-shot systemd transient timer (or deliver now) |
 | `event.rs` | File/process triggers: register background watchers; the watch loops |
 | `runcmd.rs` | `run` role: execute a command and notify on its exit |
+| `list.rs` | `list` role: query systemd and report registered notifications |
 | `deliver.rs` | Deliver the message to the recipient's terminal |
 
 ### 3.1 `main.rs` — CLI and dispatch
@@ -291,6 +292,33 @@ is best-effort — a failed notification is logged but must not change the exit
 code. Finally it `process::exit`s with the command's own code, so `hark run`
 is transparent in scripts and pipelines.
 
+### 3.7 `list.rs` — listing registered notifications (FR-34)
+
+`hark` stores no state of its own, so `list` reconstructs the registered set
+from systemd:
+
+1. `systemctl --user list-units --all --plain --no-legend 'hark-*'` enumerates
+   the units. `*.timer` units are time triggers (details live on the paired
+   `*.service`); `hark-watch-*.service` units are event watchers; the bare
+   timer-paired service is skipped (covered via its timer).
+2. For each, `systemctl --user show <service> -p Description -p ExecStart`
+   yields the structured Description and the command line.
+3. `Desc::parse` reads the Description we write at registration —
+   `hark-job kind=<time|file|pid> to=<user> [at=<rfc3339>] [event=<e>] [pid=<n>]
+   [path=<...>]`. Key/value tokens are space-separated; `path=` is always last
+   so a path containing spaces is taken as the remainder.
+4. `message_from_exec` recovers the free-form message: `--message` is always the
+   final argument in every `hark` invocation, so everything after `--message `
+   in the `argv[]` field (up to the next ` ; ` record boundary) is the message.
+
+**Design choice (encode details in the unit, not a state file).** Keeping the
+trigger/recipient in the unit Description and reading the message back from
+ExecStart preserves the "systemd is the single source of truth" invariant — no
+sidecar store to keep in sync, and `list` cannot drift from reality. The
+`systemctl show` output flattens `argv[]` (losing word boundaries), which is
+why details that may contain spaces (message, path) are positioned last so they
+can be taken as a remainder.
+
 ---
 
 ## 4. Data Design
@@ -347,6 +375,8 @@ Transient values during a run:
     variants (`3 minutes later`, `3 min`, `3m`, `90s`, `2 hours`, `1 day from
     now`, bare number), and rejection of malformed/zero/unknown-unit input.
   - `schedule`: `humanize` formatting across day/hour/minute/second mixes.
+  - `list`: `Desc::parse` (time/file/pid, path with spaces), `message_from_exec`
+    (multi-word message, none), `property` extraction.
 - **Integration / manual** (host-dependent, require a logged-in terminal and
   systemd `--user`):
   - Schedule a short self-notify; verify the timer fires within ~1s (NFR-1),
@@ -388,6 +418,7 @@ External commands: `systemd-run`, `systemctl` (scheduling/watching); `write`,
 | FR-30 | `event::watch_pid` (`/proc` poll) + `register_pid_watch` (PID precheck) |
 | FR-31, FR-33 | `event::spawn_watcher` (transient service, no `--wait`); systemd GC |
 | FR-32 | `runcmd::run` (foreground, exit-code propagation, outcome message) |
+| FR-34 | `list::list` (systemctl query; `Desc::parse` + `message_from_exec`); structured Descriptions set in `schedule`/`event` |
 | FR-7 | `timeparse::parse_absolute` |
 | FR-8..FR-10 | `timeparse::parse_duration` |
 | FR-11, FR-12 | `timeparse` errors; `schedule` past-time check |

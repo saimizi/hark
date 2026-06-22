@@ -96,15 +96,19 @@ file  created /tmp/img.wic     joukan  running    image ready         hark-watch
 proc  pid 48213                joukan  running    build done          hark-watch-...service
 ```
 
-`hark` keeps no state of its own; the list is reconstructed from systemd. Time
-jobs are transient timer units `hark-<timestamp>-<pid>`; event watchers are
-transient service units `hark-watch-<timestamp>-<pid>`. To cancel one, stop its
-unit:
+`hark` keeps no state of its own; the list is reconstructed from systemd.
+
+Cancel notifications by the unit name from the `UNIT` column:
 
 ```sh
-systemctl --user stop hark-<...>.timer             # cancel a time job
-systemctl --user stop hark-watch-<...>.service     # cancel an event watcher
+hark cancel hark-watch-20260622...service   # cancel one (or several)
+hark cancel --all                           # cancel everything
 ```
+
+Time jobs are transient timer units `hark-<timestamp>-<pid>`; event watchers are
+transient service units `hark-watch-<timestamp>-<pid>`. `hark cancel` just stops
+the unit, so the equivalent low-level form is
+`systemctl --user stop <unit>`.
 
 ## Delivery requirements & caveats
 

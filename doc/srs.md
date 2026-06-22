@@ -237,6 +237,12 @@ invocation.
   state, and the identifier needed to cancel it. The listing shall be derived
   from the platform service manager (no separate state store), and shall report
   an empty result clearly when none are registered.
+- **FR-35 (Cancel registered notifications).** The system shall provide a
+  `cancel` command that removes one or more registered notifications by their
+  identifier (as shown by `list`), or all of them with `--all`. It shall refuse
+  to act on units that are not its own, and report which notifications were
+  cancelled. Cancelling a notification before it fires shall prevent its
+  delivery.
 
 ---
 
@@ -264,6 +270,7 @@ invocation.
 hark [TRIGGER]  -m <MESSAGE> [-t <USER>]
 hark run [-m <MESSAGE>] [-t <USER>] -- <CMD> [ARGS...]
 hark list
+hark cancel (<UNIT>... | --all)
 ```
 
 | Option | Required | Description |
@@ -314,6 +321,7 @@ are invoked only by `hark` itself.
 | FR-31, FR-33 | Verify `--on-file`/`--on-exit` return promptly, watch in the background, are listable/cancellable, and leave no unit after success. |
 | FR-32 | `hark run -- <cmd>` for a passing and a failing command; verify outcome message and that hark exits with the command's code. |
 | FR-34 | Register several triggers, run `hark list`; verify each appears with trigger/recipient/message/state/unit, and that an empty set reports clearly. |
+| FR-35 | `hark cancel <unit>` and `hark cancel --all`; verify the targeted notifications disappear from `list`, a non-hark unit is refused, and an empty/no-arg invocation is handled. |
 | NFR-1 | Measure delivery latency against requested time. |
 | NFR-2..NFR-6 | Verify no-GUI operation, self-notify without root, no daemon, diagnostics, and local-time interpretation. |
 

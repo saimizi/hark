@@ -1,3 +1,4 @@
+mod cancel;
 mod deliver;
 mod event;
 mod list;
@@ -68,6 +69,16 @@ enum Command {
     /// List notifications currently registered with systemd.
     List,
 
+    /// Cancel (remove) one or more registered notifications.
+    Cancel {
+        /// Cancel all registered notifications.
+        #[arg(long)]
+        all: bool,
+        /// Unit name(s) to cancel, as shown in the UNIT column of `hark list`.
+        #[arg(value_name = "UNIT")]
+        units: Vec<String>,
+    },
+
     /// Internal: deliver a message right now (invoked by the systemd timer).
     #[command(hide = true)]
     Deliver {
@@ -112,6 +123,7 @@ fn main() -> Result<()> {
             return runcmd::run(cmd, &recipient, message.as_deref());
         }
         Some(Command::List) => return list::list(),
+        Some(Command::Cancel { all, units }) => return cancel::cancel(units, *all),
         Some(Command::Deliver { to, message }) => return deliver::deliver(to, message),
         Some(Command::WatchFile {
             path,

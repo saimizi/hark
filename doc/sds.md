@@ -117,6 +117,7 @@ Source layout (`src/`):
 | `event.rs` | File/process triggers: register background watchers; the watch loops |
 | `runcmd.rs` | `run` role: execute a command and notify on its exit |
 | `list.rs` | `list` role: query systemd and report registered notifications |
+| `cancel.rs` | `cancel` role: stop (remove) registered notification units |
 | `deliver.rs` | Deliver the message to the recipient's terminal |
 
 ### 3.1 `main.rs` — CLI and dispatch
@@ -326,6 +327,23 @@ sidecar store to keep in sync, and `list` cannot drift from reality. The
 why details that may contain spaces (message, path) are positioned last so they
 can be taken as a remainder.
 
+### 3.8 `cancel.rs` — cancelling notifications (FR-35)
+
+`cancel(units, all)` removes registered notifications by stopping their units:
+
+- With `--all`, `hark_units` lists the registered units (`parse_unit_names`
+  keeps `*.timer` and `hark-watch-*.service`; the timer-paired inactive service
+  is omitted because stopping the timer cancels the job).
+- Otherwise each named unit is checked to start with `hark-` (refusing to act on
+  foreign units) and stopped via `systemctl --user stop`.
+- Each unit is stopped individually so a failure on one is reported without
+  aborting the rest; a final `reset-failed hark-*` clears any failed leftovers
+  so `list` stays clean.
+
+Stopping a timer before it elapses prevents the delivery; stopping a watcher
+service ends the watch. This reuses systemd as the source of truth — no
+separate registry to update.
+
 ---
 
 ## 4. Data Design
@@ -384,6 +402,7 @@ Transient values during a run:
   - `schedule`: `humanize` formatting across day/hour/minute/second mixes.
   - `list`: `Desc::parse` (time/file/pid, path with spaces), `message_from_exec`
     (multi-word message, none), `property` extraction.
+  - `cancel`: `parse_unit_names` (keeps timers/watchers, omits paired service).
 - **Integration / manual** (host-dependent, require a logged-in terminal and
   systemd `--user`):
   - Schedule a short self-notify; verify the timer fires within ~1s (NFR-1),
@@ -426,6 +445,7 @@ External commands: `systemd-run`, `systemctl` (scheduling/watching); `write`,
 | FR-31, FR-33 | `event::spawn_watcher` (transient service, no `--wait`); systemd GC |
 | FR-32 | `runcmd::run` (foreground, exit-code propagation, outcome message) |
 | FR-34 | `list::list` (systemctl query; `Desc::parse` + `message_from_exec`); structured Descriptions set in `schedule`/`event` |
+| FR-35 | `cancel::cancel` (`systemctl stop`; `parse_unit_names`; hark-only guard) |
 | FR-7 | `timeparse::parse_absolute` |
 | FR-8..FR-10 | `timeparse::parse_duration` |
 | FR-11, FR-12 | `timeparse` errors; `schedule` past-time check |

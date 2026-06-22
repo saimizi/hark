@@ -118,7 +118,10 @@ Requirements are written as **shall** statements and are individually testable.
 ### 3.2 Time specification
 
 - **FR-7 (Absolute time).** The system shall accept an absolute local date and
-  time of the form `YYYY-MM-DD HH:MM` and `YYYY-MM-DD HH:MM:SS`.
+  time of the form `YYYY-MM-DD HH:MM` and `YYYY-MM-DD HH:MM:SS`. It shall also
+  accept a time only (`HH:MM` or `HH:MM:SS`), in which case the date defaults to
+  today; if that time has already passed today, the request is a past time and
+  is rejected per FR-12.
 - **FR-8 (Relative time).** The system shall accept a relative delay expressed
   as an integer quantity and a unit, supporting seconds, minutes, hours, and
   days, with common abbreviations (e.g. `90s`, `3 min`, `2 hours`, `1 day`).
@@ -255,7 +258,7 @@ hark run [-m <MESSAGE>] [-t <USER>] -- <CMD> [ARGS...]
 | Option | Required | Description |
 |--------|----------|-------------|
 | `--in <DURATION>` | trigger (≤1) | Relative delay from now; `0s` = now |
-| `--at <DATETIME>` | trigger (≤1) | Absolute local date/time |
+| `--at <DATETIME>` | trigger (≤1) | Absolute local date/time, or `HH:MM[:SS]` for today |
 | `--on-file <PATH>` | trigger (≤1) | Filesystem-event watch on a path |
 | `--event <E>` | with `--on-file` | `created` \| `modified` \| `removed` (default `modified`) |
 | `--on-exit <PID>` | trigger (≤1) | Watch until the process exits |

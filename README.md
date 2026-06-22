@@ -40,12 +40,15 @@ hark -m "ping"
 
 # Absolute date/time
 hark --at "2026-06-22 15:30" -m "standup" -t alice
+
+# Time only -> today at that time (rejected if it already passed today)
+hark --at "15:30" -m "standup"
 ```
 
 | Flag | Meaning |
 |------|---------|
 | `--in <DURATION>` | relative delay: `3 minutes later`, `90s`, `2 hours`, `1 day`; `0s` = now |
-| `--at <DATETIME>` | absolute local time: `YYYY-MM-DD HH:MM[:SS]` |
+| `--at <DATETIME>` | absolute local time: `YYYY-MM-DD HH:MM[:SS]`, or `HH:MM[:SS]` = today |
 | `-m, --message`   | the message text (required) |
 | `-t, --to <USER>` | recipient username (defaults to current user) |
 

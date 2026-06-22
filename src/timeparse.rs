@@ -2,29 +2,44 @@
 //! relative duration from now. Both resolve to an absolute local timestamp.
 
 use anyhow::{bail, Result};
-use chrono::{DateTime, Duration, Local, NaiveDateTime, TimeZone};
+use chrono::{DateTime, Duration, Local, NaiveDateTime, NaiveTime, TimeZone};
 
 /// Parse a complete date and time in the local timezone.
 ///
-/// Accepts `YYYY-MM-DD HH:MM` and `YYYY-MM-DD HH:MM:SS`.
+/// Accepts `YYYY-MM-DD HH:MM[:SS]`, or a time only (`HH:MM[:SS]`) in which case
+/// the date defaults to today.
 pub fn parse_absolute(input: &str) -> Result<DateTime<Local>> {
     let input = input.trim();
-    const FORMATS: &[&str] = &["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"];
+    let naive = parse_naive(input)?;
+    // Map the naive local time to a concrete instant. On a DST edge where the
+    // time is ambiguous or nonexistent, fall back to the earliest reading.
+    match Local.from_local_datetime(&naive).single() {
+        Some(dt) => Ok(dt),
+        None => Local
+            .from_local_datetime(&naive)
+            .earliest()
+            .ok_or_else(|| anyhow::anyhow!("invalid local time: {input}")),
+    }
+}
 
-    for fmt in FORMATS {
+/// Parse `input` into a naive local date-time, defaulting the date to today
+/// when only a time is given.
+fn parse_naive(input: &str) -> Result<NaiveDateTime> {
+    const DATETIME_FORMATS: &[&str] = &["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"];
+    for fmt in DATETIME_FORMATS {
         if let Ok(naive) = NaiveDateTime::parse_from_str(input, fmt) {
-            return match Local.from_local_datetime(&naive).single() {
-                Some(dt) => Ok(dt),
-                // Ambiguous/nonexistent local time (DST edge). Fall back to the
-                // earliest interpretation rather than failing outright.
-                None => Local
-                    .from_local_datetime(&naive)
-                    .earliest()
-                    .ok_or_else(|| anyhow::anyhow!("invalid local time: {input}")),
-            };
+            return Ok(naive);
         }
     }
-    bail!("expected `YYYY-MM-DD HH:MM[:SS]`");
+
+    const TIME_FORMATS: &[&str] = &["%H:%M:%S", "%H:%M"];
+    for fmt in TIME_FORMATS {
+        if let Ok(time) = NaiveTime::parse_from_str(input, fmt) {
+            return Ok(Local::now().date_naive().and_time(time));
+        }
+    }
+
+    bail!("expected `YYYY-MM-DD HH:MM[:SS]` or `HH:MM[:SS]`");
 }
 
 /// Parse a relative duration like `3 minutes later`, `90s`, or `2 hours`,
@@ -92,6 +107,22 @@ mod tests {
     fn absolute_without_seconds() {
         let dt = parse_absolute("2026-06-22 15:30").unwrap();
         assert_eq!(dt.format("%H:%M:%S").to_string(), "15:30:00");
+    }
+
+    #[test]
+    fn time_only_defaults_to_today() {
+        let today = Local::now().date_naive();
+        let dt = parse_absolute("15:30").unwrap();
+        assert_eq!(dt.date_naive(), today);
+        assert_eq!(dt.format("%H:%M:%S").to_string(), "15:30:00");
+    }
+
+    #[test]
+    fn time_only_with_seconds() {
+        let today = Local::now().date_naive();
+        let dt = parse_absolute("09:05:07").unwrap();
+        assert_eq!(dt.date_naive(), today);
+        assert_eq!(dt.format("%H:%M:%S").to_string(), "09:05:07");
     }
 
     #[test]

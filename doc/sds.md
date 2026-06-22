@@ -152,12 +152,14 @@ Public API:
 
 Internal: `parse_duration(&str) -> Result<chrono::Duration>`.
 
-**Absolute parsing (FR-7).** Trims input and tries, in order,
-`"%Y-%m-%d %H:%M:%S"` then `"%Y-%m-%d %H:%M"` via
-`NaiveDateTime::parse_from_str`. The naive time is mapped to `Local`. For DST
-edge cases where the local time is ambiguous or nonexistent, the earliest valid
-interpretation is chosen rather than failing (robustness). Unparseable input
-returns an error (FR-11).
+**Absolute parsing (FR-7).** `parse_naive` trims input and tries, in order,
+the date-time formats `"%Y-%m-%d %H:%M:%S"` then `"%Y-%m-%d %H:%M"`; failing
+those, the time-only formats `"%H:%M:%S"` then `"%H:%M"`, combining the time
+with `Local::now().date_naive()` (today). The resulting naive time is mapped to
+`Local`. For DST edge cases where the local time is ambiguous or nonexistent,
+the earliest valid interpretation is chosen rather than failing (robustness).
+Unparseable input returns an error (FR-11). A time-only value that has already
+passed today yields a past instant, rejected downstream by `schedule` (FR-12).
 
 **Relative parsing (FR-8..FR-10).**
 

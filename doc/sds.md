@@ -263,8 +263,11 @@ shared `spawn_watcher`, which runs `systemd-run --user --unit=… <self>
 watch-file|watch-pid …` with no `--wait`. `register_file_watch` first resolves
 the path to absolute (`absolute_path`) against the caller's working directory:
 the watcher runs under `systemd --user` with a different CWD, so a relative path
-would otherwise resolve to the wrong place (or a nonexistent parent) and the
-watch would fail immediately. The transient **service** starts and
+would otherwise resolve to the wrong place. It then verifies the path's parent
+directory exists and **fails fast** if not — inotify can only watch an existing
+directory, so this surfaces the error to the caller at registration instead of
+registering a watcher that would immediately fail in the background. Creating
+the directory first is left to the user. The transient **service** starts and
 the call returns immediately (FR-31). `register_pid_watch` first rejects a PID
 whose `/proc/<pid>` is absent (FR-30).
 

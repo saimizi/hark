@@ -73,6 +73,10 @@ hark --on-file build.log --event modified -m "log changed"
 `run -- <cmd>` runs in the foreground and exits with the command's own exit
 code. `--on-file`/`--on-exit` return immediately and watch in the background.
 
+The `--on-file` path is resolved to an absolute path, and its **parent
+directory must already exist** — `hark` rejects the registration otherwise
+(inotify can only watch an existing directory), so create the directory first.
+
 | Trigger | Meaning |
 |---------|---------|
 | `run -- <cmd>` | run a command, notify on exit with SUCCESS / FAILED (exit N) |

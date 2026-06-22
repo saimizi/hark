@@ -212,6 +212,10 @@ invocation.
   when that event next occurs for the path. When the event is omitted, it shall
   default to `modified`. For `created`, if the path already exists at
   registration time, the system shall treat the condition as already satisfied.
+  The path is resolved to an absolute path at registration time. The path's
+  parent directory must exist at registration time; if it does not, the request
+  is rejected and nothing is registered (the caller must create the directory
+  first).
 - **FR-30 (Process-exit trigger).** The system shall accept a process id and
   deliver the message when that process exits. It shall reject a process id that
   does not exist at registration time. It shall not attempt to report the exit

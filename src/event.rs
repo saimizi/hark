@@ -81,8 +81,19 @@ pub fn register_file_watch(
     // directory. The background watcher runs under systemd --user with a
     // different CWD, so a relative path would not resolve there.
     let path = absolute_path(path)?;
-    let path = path.as_str();
 
+    // The parent directory must exist now: inotify can only watch an existing
+    // directory, so fail fast here rather than registering a watcher that would
+    // immediately fail in the background.
+    let parent = Path::new(&path).parent().unwrap_or_else(|| Path::new("/"));
+    if !parent.exists() {
+        bail!(
+            "parent directory does not exist: {} — create it before watching",
+            parent.display()
+        );
+    }
+
+    let path = path.as_str();
     let unit = watch_unit();
     // Structured description so `hark list` can recover the details. `path` is
     // placed last because it may contain spaces.

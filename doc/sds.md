@@ -113,7 +113,8 @@ Source layout (`src/`):
        (FR-4).
     3. Resolve the delivery time by matching on `(--at, --in)`:
        - exactly one present → call the corresponding `timeparse` function;
-       - neither → error (FR-5);
+       - neither → default to `Local::now()`, i.e. immediate delivery
+         (FR-5, FR-27);
        - both → unreachable (clap enforces FR-6).
     4. Call `schedule::schedule`.
 - Errors propagate as `anyhow::Result`, yielding a diagnostic and non-zero exit
@@ -144,7 +145,8 @@ returns an error (FR-11).
 1. Lowercase and trim; strip a trailing `later` or `from now` (FR-9).
 2. Split into a leading numeric part (digits and optional sign) and a trailing
    unit, tolerating an optional space (`90s`, `3 min`).
-3. Reject empty/zero/negative quantities (FR-11).
+3. Reject empty or negative quantities (FR-11). A zero quantity is accepted and
+   denotes immediate delivery (FR-27).
 4. Map the unit to a `Duration`:
    - `s/sec/secs/second/seconds` → seconds
    - `(empty)/m/min/mins/minute/minutes` → minutes (empty ⇒ default minutes,
@@ -165,7 +167,10 @@ Public API: `schedule(target: DateTime<Local>, recipient: &str, message: &str)`.
 
 Algorithm:
 
-1. Compute `delay = target - now` in whole seconds; reject `<= 0` (FR-12).
+1. Compute `delay = target - now` in whole seconds. Reject `< 0` as a past time
+   (FR-12). If `== 0`, deliver inline immediately by calling `deliver::deliver`,
+   print a "Delivered now" confirmation, and return without creating a timer
+   (FR-27). Otherwise (`> 0`) proceed to register a timer.
 2. Determine the executable path via `std::env::current_exe()` so the timer
    re-invokes exactly this binary.
 3. Build a unique unit name `hark-<YYYYMMDDHHMMSS>-<pid>` (FR-14 — uniqueness
@@ -309,6 +314,7 @@ External commands: `systemd-run`, `systemctl` (scheduling); `write`, `who`
 | FR-7 | `timeparse::parse_absolute` |
 | FR-8..FR-10 | `timeparse::parse_duration` |
 | FR-11, FR-12 | `timeparse` errors; `schedule` past-time check |
+| FR-27 | `main.rs` no-time default to `Local::now()`; `schedule` `secs == 0` inline-delivery branch; `timeparse` accepts zero |
 | FR-13, FR-15 | `--on-active`, `RemainAfterElapse=no` |
 | FR-14 | unique unit name per invocation |
 | FR-16, FR-17 | confirmation print; immediate return |

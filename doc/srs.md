@@ -103,8 +103,10 @@ Requirements are written as **shall** statements and are individually testable.
 - **FR-3 (Recipient).** The system shall accept an optional recipient username.
 - **FR-4 (Default recipient).** When no recipient is given, the system shall
   use the invoking (sender) user as the recipient.
-- **FR-5 (When required).** The system shall require exactly one delivery-time
-  specification: either an absolute time or a relative delay.
+- **FR-5 (When optional, defaults to now).** The system shall accept at most one
+  delivery-time specification: either an absolute time or a relative delay. When
+  neither is given, the system shall default to immediate delivery (equivalent
+  to a zero relative delay; see FR-27).
 - **FR-6 (Mutual exclusion).** The system shall reject a request that supplies
   both an absolute time and a relative delay.
 
@@ -121,8 +123,9 @@ Requirements are written as **shall** statements and are individually testable.
   shall interpret the quantity as minutes.
 - **FR-11 (Invalid time).** The system shall reject an unparseable or
   non-positive time specification with a non-zero exit code and a diagnostic.
-- **FR-12 (Past time).** The system shall reject a delivery time that is not in
-  the future relative to the moment of scheduling.
+- **FR-12 (Past time).** The system shall reject a delivery time that is in the
+  past relative to the moment of scheduling. A zero delay (the present moment)
+  shall not be rejected; see FR-27.
 
 ### 3.3 Scheduling behavior
 
@@ -136,6 +139,11 @@ Requirements are written as **shall** statements and are individually testable.
   the resolved delivery time and an identifier for the scheduled job.
 - **FR-17 (No blocking).** The scheduling invocation shall return promptly and
   shall not remain running until delivery time.
+- **FR-27 (Immediate delivery).** The system shall treat a zero relative delay
+  (e.g. `--in 0s`) — and the absence of any delivery-time specification
+  (FR-5) — as a request to deliver immediately. In this case it shall deliver
+  inline during the invocation rather than registering a timer, report the
+  actual delivery result, and create no scheduling artifact.
 
 ### 3.4 Delivery behavior
 
@@ -205,16 +213,17 @@ and a notification that cannot be shown on a terminal is intentionally dropped.
 ### 5.1 Command-line interface
 
 ```
-hark --in <DURATION>  -m <MESSAGE> [-t <USER>]
-hark --at <DATETIME>  -m <MESSAGE> [-t <USER>]
+hark [--in <DURATION> | --at <DATETIME>]  -m <MESSAGE> [-t <USER>]
 ```
 
 | Option | Required | Description |
 |--------|----------|-------------|
-| `--in <DURATION>` | one of `--in`/`--at` | Relative delay from now |
-| `--at <DATETIME>` | one of `--in`/`--at` | Absolute local date/time |
+| `--in <DURATION>` | no (mutually exclusive with `--at`) | Relative delay from now; `0s` = now |
+| `--at <DATETIME>` | no (mutually exclusive with `--in`) | Absolute local date/time |
 | `-m, --message <TEXT>` | yes | Message text |
 | `-t, --to <USER>` | no | Recipient username (default: sender) |
+
+If neither `--in` nor `--at` is given, the message is delivered immediately.
 
 An internal, hidden `deliver` subcommand performs delivery and is not part of
 the public interface; it is invoked only by the scheduler.
@@ -239,8 +248,9 @@ the public interface; it is invoked only by the scheduler.
 | ID | Acceptance check |
 |----|------------------|
 | FR-1..FR-4 | Schedule with/without message and recipient; verify defaults and rejection. |
-| FR-5..FR-12 | Provide absolute, relative, both, neither, malformed, and past times; verify parse results and rejections. |
+| FR-5..FR-12 | Provide absolute, relative, both, and malformed/past times; verify parse results, rejection of both/past, and that omitting the time defaults to immediate delivery (FR-5/FR-27). |
 | FR-13..FR-17 | Verify single delivery, coexistence of multiple jobs, cleanup after success, confirmation output, and prompt return. |
+| FR-27 | Run with `--in 0s`, and also with no `--in`/`--at`; verify immediate inline delivery, real result reported, and no timer unit created. |
 | FR-18..FR-22 | Verify terminal delivery, fallback path, failure reporting, and banner presence. |
 | FR-23..FR-26 | Schedule for a recipient who is not on any terminal; verify the message is dropped (no retry/queue/inbox) and the failure is recorded in the service log. |
 | NFR-1 | Measure delivery latency against requested time. |

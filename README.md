@@ -24,18 +24,24 @@ No root, no daemon, no persistent state — each invocation is independent.
 hark --in "3 minutes later" -m "stretch your legs"
 hark --in 90s -m "tea is ready"
 
+# Send now — delivered inline, no timer created.
+# `--in 0s` and omitting the time entirely are equivalent.
+hark --in 0s -m "ping"
+hark -m "ping"
+
 # Absolute date/time
 hark --at "2026-06-22 15:30" -m "standup" -t alice
 ```
 
 | Flag | Meaning |
 |------|---------|
-| `--in <DURATION>` | relative delay: `3 minutes later`, `90s`, `2 hours`, `1 day` |
+| `--in <DURATION>` | relative delay: `3 minutes later`, `90s`, `2 hours`, `1 day`; `0s` = now |
 | `--at <DATETIME>` | absolute local time: `YYYY-MM-DD HH:MM[:SS]` |
 | `-m, --message`   | the message text (required) |
 | `-t, --to <USER>` | recipient username (defaults to current user) |
 
-`--in` and `--at` are mutually exclusive; exactly one is required.
+`--in` and `--at` are mutually exclusive. If neither is given, the message is
+delivered immediately.
 
 ## Inspecting / cancelling scheduled jobs
 

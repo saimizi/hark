@@ -37,7 +37,8 @@ pub fn parse_relative(input: &str) -> Result<DateTime<Local>> {
 /// Parse a human duration into a [`chrono::Duration`].
 ///
 /// Forms accepted (case-insensitive, optional trailing "later"/"from now"):
-///   `3 minutes`, `3 min`, `3m`, `90s`, `2 hours`, `1 day`.
+///   `3 minutes`, `3 min`, `3m`, `90s`, `2 hours`, `1 day`. A zero duration
+///   (e.g. `0s`) is accepted and denotes immediate delivery.
 fn parse_duration(input: &str) -> Result<Duration> {
     let mut s = input.trim().to_lowercase();
     for suffix in [" later", " from now"] {
@@ -59,9 +60,10 @@ fn parse_duration(input: &str) -> Result<Duration> {
         bail!("expected a number, e.g. `3 minutes`");
     }
     let amount: i64 = num_part.parse()?;
-    if amount <= 0 {
-        bail!("duration must be positive");
+    if amount < 0 {
+        bail!("duration must not be negative");
     }
+    // A zero duration is allowed and means "now" (immediate delivery).
 
     let dur = match unit {
         "s" | "sec" | "secs" | "second" | "seconds" => Duration::seconds(amount),
@@ -112,9 +114,16 @@ mod tests {
     }
 
     #[test]
+    fn relative_zero_means_now() {
+        assert_eq!(parse_duration("0s").unwrap(), Duration::zero());
+        assert_eq!(parse_duration("0").unwrap(), Duration::zero());
+        assert_eq!(parse_duration("0 minutes").unwrap(), Duration::zero());
+    }
+
+    #[test]
     fn relative_rejects_bad_input() {
         assert!(parse_duration("minutes").is_err());
-        assert!(parse_duration("0 minutes").is_err());
+        assert!(parse_duration("-5m").is_err());
         assert!(parse_duration("3 lightyears").is_err());
     }
 }

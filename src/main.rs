@@ -2,7 +2,7 @@ mod deliver;
 mod schedule;
 mod timeparse;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
 /// CUI timer notifier — schedule a text message to a local user, delivered via write(1).
@@ -67,7 +67,8 @@ fn main() -> Result<()> {
             .with_context(|| format!("could not parse date/time: {at:?}"))?,
         (None, Some(rel)) => timeparse::parse_relative(rel)
             .with_context(|| format!("could not parse relative time: {rel:?}"))?,
-        (None, None) => bail!("specify when to send with --at <DATETIME> or --in <DURATION>"),
+        // Neither given: default to now (immediate delivery), i.e. `--in 0s`.
+        (None, None) => chrono::Local::now(),
         (Some(_), Some(_)) => unreachable!("--at and --in are mutually exclusive"),
     };
 

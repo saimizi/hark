@@ -11,11 +11,20 @@ pub fn schedule(target: DateTime<Local>, recipient: &str, message: &str) -> Resu
     let delay = target - now;
     let secs = delay.num_seconds();
 
-    if secs <= 0 {
+    if secs < 0 {
         bail!(
-            "target time {} is not in the future",
+            "target time {} is in the past",
             target.format("%Y-%m-%d %H:%M:%S")
         );
+    }
+
+    // Zero delay (e.g. `--in 0s`) means "send now": deliver inline rather than
+    // registering a timer, so the caller gets the real delivery result and no
+    // transient unit is created.
+    if secs == 0 {
+        crate::deliver::deliver(recipient, message)?;
+        println!("Delivered now to '{recipient}'");
+        return Ok(());
     }
 
     let exe = std::env::current_exe().context("could not determine own executable path")?;
@@ -28,7 +37,7 @@ pub fn schedule(target: DateTime<Local>, recipient: &str, message: &str) -> Resu
         .arg(format!("--on-active={secs}s"))
         // Garbage-collect the timer unit once it has elapsed: true one-shot.
         .arg("--timer-property=RemainAfterElapse=no")
-        // Default accuracy is 1min, which can fire many seconds late. A
+        // Default accuracy is 1min, which can fire many seconds late;
         // hark wants to be punctual.
         .arg("--timer-property=AccuracySec=1s")
         .arg(format!("--unit={unit}"))

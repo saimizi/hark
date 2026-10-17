@@ -10,6 +10,9 @@ use anyhow::{Context, Result};
 use chrono::DateTime;
 use std::process::Command;
 
+#[allow(unused)]
+use jlogger_tracing::{jdebug, jerror, jinfo, jwarn};
+
 /// One registered notification, as derived from its systemd unit.
 struct Job {
     typ: String,     // "time" | "file" | "proc" | "?"
@@ -45,7 +48,7 @@ pub fn list() -> Result<()> {
     }
 
     if jobs.is_empty() {
-        println!("No registered notifications.");
+        jinfo!("No registered notifications.");
         return Ok(());
     }
     render(&jobs);
@@ -172,7 +175,7 @@ fn render(jobs: &[Job]) {
         }
     }
     let row = |c: [&str; 6]| {
-        println!(
+        jinfo!(
             "{:<tw$}  {:<rw$}  {:<ow$}  {:<sw$}  {:<mw$}  {}",
             c[0],
             c[1],

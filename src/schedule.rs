@@ -3,6 +3,8 @@
 
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Local};
+#[allow(unused)]
+use jlogger_tracing::{jdebug, jerror, jinfo, jwarn};
 use std::process::Command;
 
 /// Schedule delivery of `message` to `recipient` at `target`.
@@ -28,7 +30,7 @@ pub fn schedule(
     // transient unit is created.
     if secs == 0 {
         crate::deliver::deliver(recipient, message)?;
-        println!("Delivered now to '{recipient}'");
+        jdebug!("Delivered now to '{recipient}'");
         return Ok(());
     }
 
@@ -65,7 +67,7 @@ pub fn schedule(
         bail!("systemd-run exited with {status}");
     }
 
-    println!(
+    jinfo!(
         "Scheduled notify to '{recipient}' at {} (in {}), unit {unit}",
         target.format("%Y-%m-%d %H:%M:%S"),
         humanize(secs),

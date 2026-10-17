@@ -121,7 +121,7 @@ pub fn register_file_watch(
         ],
         verbose,
     )?;
-    println!(
+    jinfo!(
         "Watching '{path}' until it {}; will notify '{recipient}'. unit {unit}",
         event.describe()
     );
@@ -149,7 +149,7 @@ pub fn register_pid_watch(pid: i32, recipient: &str, message: &str, verbose: u8)
         ],
         verbose,
     )?;
-    println!("Watching PID {pid}; will notify '{recipient}' when it exits. unit {unit}");
+    jinfo!("Watching PID {pid}; will notify '{recipient}' when it exits. unit {unit}");
     Ok(())
 }
 

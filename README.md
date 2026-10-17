@@ -19,9 +19,10 @@ finishes." One-shot, callable many times.
   **including its success/failure status** (it is the command's parent, so it
   has the real exit code).
 
-Delivery (hidden `deliver` role) sends the text to the recipient's terminal via
-`write(1)`, falling back to writing directly to the recipient's TTYs when
-`write(1)` is unusable.
+Delivery (hidden `deliver` role) sends self-notifications directly to all owned
+terminal devices. It discovers numbered `/dev/pts/*` and `/dev/tty*` devices by
+UID, so WezTerm, SSH, and tmux terminals need no `who` login entry. For another
+user, it tries `write(1)` first and falls back to device discovery.
 
 No root, no daemon of its own, no persistent state — each invocation is
 independent.
@@ -115,10 +116,11 @@ the unit, so the equivalent low-level form is
 Delivery uses terminal messaging, so the recipient must be **logged in on a
 terminal** (tty/pts) at delivery time.
 
-- Sending **to yourself** works out of the box: the fallback writes directly to
-  your own terminals even if `write(1)` is broken. Note that some terminals
-  (e.g. tmux) disable messaging (`mesg n`) — the direct fallback still reaches
-  terminals you own.
+- Sending **to yourself** writes directly to all your owned terminal devices,
+  even if `write(1)` is broken or messaging is disabled (`mesg n`). Each reached
+  device is reported on stderr. Ownership does not guarantee an active login:
+  inactive tmux panes can also receive messages, and full-screen applications
+  may overwrite them. Only devices visible in the current `/dev` are discovered.
 - Sending **to another user** requires a working, set-gid `tty` `write(1)`
   binary (`-rwxr-sr-x root tty`) and that the recipient has `mesg y`. On systems
   where `write` has lost its set-gid bit, cross-user delivery won't work without

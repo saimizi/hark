@@ -5,22 +5,26 @@ use anyhow::{bail, Context, Result};
 use chrono::Local;
 use std::fs::OpenOptions;
 use std::io::Write;
+use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt};
 use std::process::{Command, Stdio};
 
 /// Deliver `message` to `recipient`.
 ///
-/// Primary path is write(1), which targets a logged-in user's TTY. On systems
-/// where write(1) is unusable (e.g. missing its set-gid `tty` bit) we fall back
-/// to writing directly to the recipient's own terminals — the same mechanism
-/// write(1) uses, but limited to TTYs this process can open. Output/errors land
-/// in the systemd journal for the transient unit.
+/// Self-notifications write directly to all owned terminal devices. Other
+/// recipients use write(1) first, with device discovery as a fallback.
+/// Output/errors land in the systemd journal for transient units.
 pub fn deliver(recipient: &str, message: &str) -> Result<()> {
+    // Self-notifications go to every owned terminal, including sessions that
+    // terminal emulators do not register in utmp (and therefore `who`).
+    let uid = recipient_uid(recipient)?;
+    if uid == unsafe { libc::getuid() } && deliver_via_ttys(uid, message)? > 0 {
+        return Ok(());
+    }
     match deliver_via_write(recipient, message) {
         Ok(()) => Ok(()),
         Err(write_err) => {
             eprintln!("write(1) failed ({write_err:#}); trying direct TTY delivery");
-            let delivered =
-                deliver_via_ttys(recipient, message).context("direct TTY delivery failed")?;
+            let delivered = deliver_via_ttys(uid, message).context("direct TTY delivery failed")?;
             if delivered == 0 {
                 bail!(
                     "could not reach '{recipient}': not logged in on a writable terminal \
@@ -67,20 +71,29 @@ fn deliver_via_write(recipient: &str, message: &str) -> Result<()> {
 
 /// Write the message directly to each of the recipient's terminals that this
 /// process can open, returning how many received it.
-fn deliver_via_ttys(recipient: &str, message: &str) -> Result<usize> {
+fn deliver_via_ttys(uid: u32, message: &str) -> Result<usize> {
     let banner = banner();
     let mut delivered = 0;
 
-    for tty in recipient_ttys(recipient)? {
-        let path = format!("/dev/{tty}");
-        match OpenOptions::new().write(true).open(&path) {
+    for path in recipient_ttys(uid)? {
+        match OpenOptions::new()
+            .write(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_NOCTTY)
+            .open(&path)
+        {
             Ok(mut dev) => {
+                // Recheck the opened device in case it changed during discovery.
+                let metadata = dev.metadata()?;
+                if metadata.uid() != uid || !metadata.file_type().is_char_device() {
+                    continue;
+                }
                 // CRLF so the text renders cleanly on a raw terminal line.
                 let payload = format!("\r\n{banner}\r\n{}\r\n", message.replace('\n', "\r\n"));
                 if let Err(e) = dev.write_all(payload.as_bytes()) {
                     eprintln!("could not write to {path}: {e}");
                 } else {
                     delivered += 1;
+                    eprintln!("delivered to {path}");
                 }
             }
             // Messaging disabled / not ours / not a real device: skip quietly.
@@ -90,29 +103,50 @@ fn deliver_via_ttys(recipient: &str, message: &str) -> Result<usize> {
     Ok(delivered)
 }
 
-/// The terminals `recipient` is currently logged in on, per who(1).
-fn recipient_ttys(recipient: &str) -> Result<Vec<String>> {
-    let output = Command::new("who")
+/// Resolve through NSS, including users supplied by directory services.
+fn recipient_uid(recipient: &str) -> Result<u32> {
+    let output = Command::new("getent")
+        .args(["passwd", recipient])
         .output()
-        .context("failed to run who(1)")?;
+        .context("failed to run getent passwd")?;
     if !output.status.success() {
-        bail!("who(1) exited with {}", output.status);
+        bail!("could not resolve recipient: {recipient}");
     }
     let text = String::from_utf8_lossy(&output.stdout);
-    let ttys = text
-        .lines()
-        .filter_map(|line| {
-            let mut cols = line.split_whitespace();
-            let user = cols.next()?;
-            let tty = cols.next()?;
-            // Only real character-device terminals (tty*/pts/*), not X displays.
-            if user == recipient && (tty.starts_with("tty") || tty.starts_with("pts/")) {
-                Some(tty.to_string())
-            } else {
-                None
+    text.split(':')
+        .nth(2)
+        .context("missing UID in passwd record")?
+        .parse()
+        .context("invalid UID in passwd record")
+}
+
+/// Discover owned PTYs and numbered Linux consoles without login records.
+fn recipient_ttys(uid: u32) -> Result<Vec<String>> {
+    let mut ttys = Vec::new();
+    for (directory, prefix) in [("/dev/pts", ""), ("/dev", "tty")] {
+        for entry in
+            std::fs::read_dir(directory).with_context(|| format!("could not scan {directory}"))?
+        {
+            let entry = entry?;
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else { continue };
+            let Some(number) = name.strip_prefix(prefix) else {
+                continue;
+            };
+            if number.is_empty() || !number.bytes().all(|c| c.is_ascii_digit()) {
+                continue;
             }
-        })
-        .collect();
+            let path = entry.path();
+            // Do not follow aliases or symlinks to unrelated devices.
+            let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+                continue;
+            };
+            if metadata.uid() == uid && metadata.file_type().is_char_device() {
+                ttys.push(path.to_string_lossy().into_owned());
+            }
+        }
+    }
+    ttys.sort();
     Ok(ttys)
 }
 

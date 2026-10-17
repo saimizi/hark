@@ -6,7 +6,12 @@ use chrono::{DateTime, Local};
 use std::process::Command;
 
 /// Schedule delivery of `message` to `recipient` at `target`.
-pub fn schedule(target: DateTime<Local>, recipient: &str, message: &str) -> Result<()> {
+pub fn schedule(
+    target: DateTime<Local>,
+    recipient: &str,
+    message: &str,
+    verbose: u8,
+) -> Result<()> {
     let now = Local::now();
     let delay = target - now;
     let secs = delay.num_seconds();
@@ -47,6 +52,7 @@ pub fn schedule(target: DateTime<Local>, recipient: &str, message: &str) -> Resu
             target.to_rfc3339()
         ))
         .arg(&exe)
+        .args(std::iter::repeat("-v").take(verbose.into()))
         .arg("deliver")
         .arg("--to")
         .arg(recipient)

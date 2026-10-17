@@ -7,8 +7,10 @@ mod schedule;
 mod timeparse;
 
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{ArgAction, Parser, Subcommand};
 use event::FileEvent;
+#[allow(unused)]
+use jlogger_tracing::{jinfo, JloggerBuilder, LevelFilter};
 
 /// CUI timer notifier — schedule a text message to a local user, delivered via write(1).
 #[derive(Parser, Debug)]
@@ -41,6 +43,10 @@ struct Cli {
     /// Recipient username. Defaults to the current user.
     #[arg(short = 't', long = "to", value_name = "USER")]
     to: Option<String>,
+
+    /// Increase verbosity
+    #[arg(short, long, global = true, action = ArgAction::Count)]
+    verbose: u8,
 
     #[command(subcommand)]
     command: Option<Command>,
@@ -116,6 +122,18 @@ enum Command {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    match cli.verbose {
+        0 => {
+            JloggerBuilder::new().max_level(LevelFilter::INFO).build();
+        }
+        1 => {
+            JloggerBuilder::new().max_level(LevelFilter::DEBUG).build();
+        }
+        _ => {
+            JloggerBuilder::new().max_level(LevelFilter::TRACE).build();
+        }
+    }
+
     // Subcommand roles.
     match &cli.command {
         Some(Command::Run { message, to, cmd }) => {
@@ -145,11 +163,11 @@ fn main() -> Result<()> {
 
     // Dispatch by trigger kind (the clap "trigger" group is mutually exclusive).
     if let Some(pid) = cli.on_exit {
-        return event::register_pid_watch(pid, &recipient, message);
+        return event::register_pid_watch(pid, &recipient, message, cli.verbose);
     }
     if let Some(path) = &cli.on_file {
         let ev = cli.event.unwrap_or(FileEvent::Modified);
-        return event::register_file_watch(path, ev, &recipient, message);
+        return event::register_file_watch(path, ev, &recipient, message, cli.verbose);
     }
 
     // Otherwise it's a time-based trigger (default: now).
@@ -162,5 +180,5 @@ fn main() -> Result<()> {
         (Some(_), Some(_)) => unreachable!("clap enforces trigger mutual exclusion"),
     };
 
-    schedule::schedule(target, &recipient, message)
+    schedule::schedule(target, &recipient, message, cli.verbose)
 }

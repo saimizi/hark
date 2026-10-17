@@ -10,6 +10,8 @@ use anyhow::{bail, Context, Result};
 use chrono::Local;
 use clap::ValueEnum;
 use inotify::{Inotify, WatchMask};
+#[allow(unused)]
+use jlogger_tracing::{jdebug, jerror, jinfo, jwarn};
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
@@ -54,13 +56,14 @@ fn watch_unit() -> String {
 }
 
 /// Start `systemd-run --user <unit> -- <self> <args...>` as a background service.
-fn spawn_watcher(unit: &str, description: &str, args: &[&str]) -> Result<()> {
+fn spawn_watcher(unit: &str, description: &str, args: &[&str], verbose: u8) -> Result<()> {
     let exe = std::env::current_exe().context("could not determine own executable path")?;
     let status = Command::new("systemd-run")
         .arg("--user")
         .arg(format!("--unit={unit}"))
         .arg(format!("--description={description}"))
         .arg(&exe)
+        .args(std::iter::repeat("-v").take(verbose.into()))
         .args(args)
         .status()
         .context("failed to launch systemd-run (is systemd --user available?)")?;
@@ -76,6 +79,7 @@ pub fn register_file_watch(
     event: FileEvent,
     recipient: &str,
     message: &str,
+    verbose: u8,
 ) -> Result<()> {
     // Resolve to an absolute path now, while we still have the caller's working
     // directory. The background watcher runs under systemd --user with a
@@ -115,6 +119,7 @@ pub fn register_file_watch(
             "--message",
             message,
         ],
+        verbose,
     )?;
     println!(
         "Watching '{path}' until it {}; will notify '{recipient}'. unit {unit}",
@@ -124,7 +129,7 @@ pub fn register_file_watch(
 }
 
 /// Register a background watcher that notifies when process `pid` exits.
-pub fn register_pid_watch(pid: i32, recipient: &str, message: &str) -> Result<()> {
+pub fn register_pid_watch(pid: i32, recipient: &str, message: &str, verbose: u8) -> Result<()> {
     if !proc_exists(pid) {
         bail!("no such process: {pid}");
     }
@@ -142,6 +147,7 @@ pub fn register_pid_watch(pid: i32, recipient: &str, message: &str) -> Result<()
             "--message",
             message,
         ],
+        verbose,
     )?;
     println!("Watching PID {pid}; will notify '{recipient}' when it exits. unit {unit}");
     Ok(())
@@ -245,6 +251,6 @@ mod tests {
 
 fn deliver_and_log(recipient: &str, message: &str) -> Result<()> {
     crate::deliver::deliver(recipient, message)?;
-    eprintln!("delivered to '{recipient}'");
+    jdebug!("delivered to '{recipient}'");
     Ok(())
 }

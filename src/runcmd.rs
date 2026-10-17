@@ -3,6 +3,8 @@
 //! code is available — ideal for "tell me when the build finishes or fails".
 
 use anyhow::{Context, Result};
+#[allow(unused)]
+use jlogger_tracing::{jdebug, jerror, jinfo, jwarn};
 use std::os::unix::process::ExitStatusExt;
 use std::process::Command;
 
@@ -38,7 +40,7 @@ pub fn run(cmd: &[String], recipient: &str, prefix: Option<&str>) -> Result<()> 
     let message = format!("{base} {outcome}");
     // Best-effort: a failed notification must not mask the command's exit code.
     if let Err(e) = crate::deliver::deliver(recipient, &message) {
-        eprintln!("notification failed: {e:#}");
+        jerror!("notification failed: {e:#}");
     }
 
     // Propagate the command's exit status to our caller.

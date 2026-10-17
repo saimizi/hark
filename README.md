@@ -52,9 +52,15 @@ hark --at "15:30" -m "standup"
 | `--at <DATETIME>` | absolute local time: `YYYY-MM-DD HH:MM[:SS]`, or `HH:MM[:SS]` = today |
 | `-m, --message`   | the message text (required) |
 | `-t, --to <USER>` | recipient username (defaults to current user) |
+| `-v, --verbose` | enable debug logs; repeat (`-vv`) for trace level |
 
 `--in`, `--at`, `--on-file`, and `--on-exit` are mutually exclusive triggers. If
 none is given, the message is delivered immediately.
+
+Verbosity can be set before or after a subcommand, for example
+`hark run -v -- make`. Flags after `--` belong to the child command. Timers and
+watchers inherit the selected verbosity; their logs are available through
+`journalctl --user -u 'hark-*.service' --since today`.
 
 ## Event triggers
 

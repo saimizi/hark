@@ -5,6 +5,8 @@
 //! in the `UNIT` column of `hark list`.
 
 use anyhow::{bail, Context, Result};
+#[allow(unused)]
+use jlogger_tracing::{jdebug, jerror, jinfo, jwarn};
 use std::process::Command;
 
 /// Cancel the named `units`, or every hark notification when `all` is set.
@@ -29,7 +31,7 @@ pub fn cancel(units: &[String], all: bool) -> Result<()> {
     };
 
     if targets.is_empty() {
-        println!("No registered notifications.");
+        jinfo!("No registered notifications.");
         return Ok(());
     }
 
@@ -37,10 +39,10 @@ pub fn cancel(units: &[String], all: bool) -> Result<()> {
     for unit in &targets {
         match stop(unit) {
             Ok(()) => {
-                println!("Cancelled {unit}");
+                jinfo!("Cancelled {unit}");
                 cancelled += 1;
             }
-            Err(e) => eprintln!("could not cancel {unit}: {e:#}"),
+            Err(e) => jerror!("could not cancel {unit}: {e:#}"),
         }
     }
 

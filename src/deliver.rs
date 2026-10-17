@@ -3,6 +3,8 @@
 
 use anyhow::{bail, Context, Result};
 use chrono::Local;
+#[allow(unused)]
+use jlogger_tracing::{jdebug, jerror, jinfo, jwarn};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt};
@@ -23,7 +25,7 @@ pub fn deliver(recipient: &str, message: &str) -> Result<()> {
     match deliver_via_write(recipient, message) {
         Ok(()) => Ok(()),
         Err(write_err) => {
-            eprintln!("write(1) failed ({write_err:#}); trying direct TTY delivery");
+            jerror!("write(1) failed ({write_err:#}); trying direct TTY delivery");
             let delivered = deliver_via_ttys(uid, message).context("direct TTY delivery failed")?;
             if delivered == 0 {
                 bail!(
@@ -31,7 +33,7 @@ pub fn deliver(recipient: &str, message: &str) -> Result<()> {
                      (messaging disabled, or no permission to other users' TTYs)"
                 );
             }
-            eprintln!("delivered to {delivered} terminal(s) of '{recipient}'");
+            jdebug!("delivered to {delivered} terminal(s) of '{recipient}'");
             Ok(())
         }
     }
@@ -90,14 +92,14 @@ fn deliver_via_ttys(uid: u32, message: &str) -> Result<usize> {
                 // CRLF so the text renders cleanly on a raw terminal line.
                 let payload = format!("\r\n{banner}\r\n{}\r\n", message.replace('\n', "\r\n"));
                 if let Err(e) = dev.write_all(payload.as_bytes()) {
-                    eprintln!("could not write to {path}: {e}");
+                    jerror!("could not write to {path}: {e}");
                 } else {
                     delivered += 1;
-                    eprintln!("delivered to {path}");
+                    jdebug!("delivered to {path}");
                 }
             }
             // Messaging disabled / not ours / not a real device: skip quietly.
-            Err(e) => eprintln!("skipping {path}: {e}"),
+            Err(e) => jwarn!("skipping {path}: {e}"),
         }
     }
     Ok(delivered)
